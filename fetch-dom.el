@@ -78,10 +78,11 @@ the result)."
       :wait-period-popup wait-period-popup
       :user-agent user-agent
       :type type))
-    (while (not done)
-      (sit-for 0.01)
-      (thread-yield))
-    (car done)))
+    (unless callback
+      (while (not done)
+	(sit-for 0.01)
+	(thread-yield))
+      (car done))))
 
 (defun fetch-dom--async-1 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
