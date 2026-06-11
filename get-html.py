@@ -29,7 +29,7 @@ prefs = {"profile.default_content_setting_values.notifications" : 2}
 chrome_options.add_experimental_option("prefs", prefs)
 chrome_options.add_argument("--disable-notifications")
 # The default User-Agent is "HeadlessChrome", which imdb.com bans.
-chrome_options.add_argument('--user-agent' + user_agent)
+chrome_options.add_argument('--user-agent=' + user_agent)
 if headless == "headless":
     chrome_options.add_argument("--headless=new")
 chrome_options.add_argument("--disable-dev-shm-usage");
