@@ -50,49 +50,92 @@
 
 (defvar fetch-dom--host-values (make-hash-table :test #'equal))
 
+(cl-defstruct fetch-dom
+  url wait-period-headless wait-period-popup
+  user-agent type callback)
+
 (cl-defun fetch-dom (url &key wait-period-headless wait-period-popup
-			 user-agent (type 'dom))
+			 user-agent (type 'dom)
+			 callback)
   "Fetch URL.
 
 By default, the DOM is returned, but this is controlled by the
 `:type' keyword.  Values are `dom' (the default),
 `string' (return the results as a string) and `buffer' (return a
-buffer containing the data)."
-  (let ((fetch-dom-user-agent (or user-agent fetch-dom-user-agent))
-	(host (url-host (url-generic-parse-url url))))
-    (or
-     ;; First try to fetch using url.el.
-     (and
-      (fetch-dom--try-internal-p host)
-      (with-current-buffer (fetch-dom--internal url)
-	(goto-char (point-min))
-	(if (not (search-forward "\n\n" nil t))
-	    (progn
-	      (kill-buffer (current-buffer))
-	      nil)
-	  (delete-region (point-min) (point))
-	  (if (not (fetch-dom--got-result-p))
-	      (fetch-dom--failure 'internal host)
-	    (fetch-dom--success 'internal host)
-	    (fetch-dom--return-result type)))))
-     (and
-      (fetch-dom--try-headless-p host)
-      (with-current-buffer (fetch-dom--selenium
-			    url "headless"
-			    (or wait-period-headless
-				fetch-dom-wait-period-headless))
-	(if (not (fetch-dom--got-result-p))
-	    (fetch-dom--failure 'headless host)
-	  (fetch-dom--success 'headless host)
-	  (fetch-dom--return-result type))))
-     (with-current-buffer (fetch-dom--selenium
-			    url "popup"
-			    (or wait-period-popup
-				fetch-dom-wait-period-popup))
+buffer containing the data).
+
+If `:callback' is given, the function will be asynchronous and
+the callback argument will be called (with a single parameter --
+the result)."
+  (let ((done nil))
+    (fetch-dom--async-1
+     (make-fetch-dom
+      :url url
+      :callback (or callback
+		    (lambda (result)
+		      (setq done (list result))))
+      :wait-period-headless wait-period-headless
+      :wait-period-popup wait-period-popup
+      :user-agent user-agent
+      :type type))
+    (while (not done)
+      (sit-for 0.01)
+      (thread-yield))
+    (car done)))
+
+(defun fetch-dom--async-1 (call)
+  (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
+    ;; First try to fetch using url.el.
+    (if (not (fetch-dom--try-internal-p host))
+	(fetch-dom--async-2 call)
+      (fetch-dom--internal
+       (fetch-dom-url call)
+       (or (fetch-dom-user-agent call) fetch-dom-user-agent)
+       (lambda (_)
+	 ;; Remove HTTP headers.
+	 (goto-char (point-min))
+	 (if (not (search-forward "\n\n" nil t))
+	     (delete-region (point-min) (point-max))
+	   (delete-region (point-min) (point)))
+	 (if (not (fetch-dom--got-result-p))
+	     (progn
+	       (fetch-dom--failure 'internal host)
+	       (fetch-dom--async-2 call))
+	   (fetch-dom--success 'internal host)
+	   (funcall (fetch-dom-callback call)
+		    (fetch-dom--return-result (fetch-dom-type call)))))))))
+
+(defun fetch-dom--async-2 (call)
+  (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
+    (if (not (fetch-dom--try-headless-p host))
+	(fetch-dom--async-3 call)
+      (fetch-dom--selenium
+       (fetch-dom-url call) "headless"
+       (or (fetch-dom-wait-period-headless call)
+	   fetch-dom-wait-period-headless)
+       (or (fetch-dom-user-agent call) fetch-dom-user-agent)
+       (lambda ()
+	 (if (not (fetch-dom--got-result-p))
+	     (progn
+	       (fetch-dom--failure 'headless host)
+	       (fetch-dom--async-3 call))
+	   (fetch-dom--success 'headless host)
+	   (funcall (fetch-dom-callback call)
+		    (fetch-dom--return-result (fetch-dom-type call)))))))))
+
+(defun fetch-dom--async-3 (call)
+  (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
+    (fetch-dom--selenium
+     (fetch-dom-url call) "popup"
+     (or (fetch-dom-wait-period-popup call)
+	 fetch-dom-wait-period-popup)
+     (or (fetch-dom-user-agent call) fetch-dom-user-agent)
+     (lambda ()
        (if (not (fetch-dom--got-result-p))
 	   (fetch-dom--failure 'popup host)
 	 (fetch-dom--success 'popup host)
-	 (fetch-dom--return-result type))))))
+	 (funcall (fetch-dom-callback call)
+		  (fetch-dom--return-result (fetch-dom-type call))))))))
 
 (defun fetch-dom--success (type host)
   (push type (gethash host fetch-dom--host-values)))
@@ -168,7 +211,7 @@ buffer containing the data)."
 	       (kill-buffer (current-buffer))))
     (`buffer (current-buffer))))
 
-(defun fetch-dom--internal (url)
+(defun fetch-dom--internal (url user-agent callback)
   (let ((cookies
 	 (and
 	  (file-exists-p fetch-dom-cookie-file)
@@ -181,7 +224,8 @@ buffer containing the data)."
 	      (json-parse-buffer :object-type 'plist)))))
 	;; Don't overwrite the user's real cookies.
 	(url-cookie-secure-storage nil)
-	(url-cookie-storage nil))
+	(url-cookie-storage nil)
+	(url-user-agent user-agent))
     (cl-loop for cookie across cookies
 	     do (url-cookie-store
 		 (plist-get cookie 'name)
@@ -190,19 +234,26 @@ buffer containing the data)."
 		 (plist-get cookie 'domain)
 		 (plist-get cookie 'path)
 		 (plist-get cookie 'secure)))
-    (url-retrieve-synchronously url t nil fetch-dom-wait-period-popup)))
+    (url-retrieve url callback nil t)))
 
-(defun fetch-dom--selenium (url headless wait-period)
+(defun fetch-dom--selenium (url headless wait-period user-agent callback)
   (with-current-buffer (generate-new-buffer "*fetch-dom*")
     (let ((default-directory (file-name-directory
 			      (locate-library "fetch-dom"))))
-      (call-process (expand-file-name "get-html.py") nil t nil
-		    url
-		    headless
-		    fetch-dom-user-agent
-		    (format "%d" wait-period)
-		    (expand-file-name fetch-dom-cookie-file)))
-    (current-buffer)))
+      (make-process
+       :name "get-html"
+       :buffer (current-buffer)
+       :command (list (expand-file-name "get-html.py")
+		      url
+		      headless
+		      user-agent
+		      (format "%d" wait-period)
+		      (expand-file-name fetch-dom-cookie-file))
+       :sentinel
+       (lambda (proc _status)
+	 (unless (process-live-p proc)
+	   (with-current-buffer (process-buffer proc)
+	     (funcall callback))))))))
 
 (provide 'fetch-dom)
 
