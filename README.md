@@ -25,3 +25,11 @@ Here's a recipe to install under Debian; your mileage may vary:
 sudo apt install chromium chromium-driver python3-selenium
 ```
 
+Then to use, say:
+
+```
+(push "~/src/fetch-dom.el/" load-path)
+(require 'fetch-dom)
+(fetch-dom "https://gnus.org/")
+```
+

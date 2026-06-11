@@ -137,11 +137,13 @@ buffer containing the data)."
 	     (< p1 p2)))))
 
 (defun fetch-dom--got-result-p ()
+  ;; We say that the fetch failed if there's very little data, or
+  ;; whether there's very few HTML nodes.  This may need adjusting.
   (let ((result
 	 (and (> (buffer-size) 100)
 	      (> (fetch-dom--count (libxml-parse-html-region
 				    (point-min) (point-max)))
-		 100))))
+		 10))))
     (unless result
       (kill-buffer (current-buffer)))
     result))
