@@ -49,6 +49,7 @@
   "The Pickle file used to save cookies.")
 
 (defvar fetch-dom--host-values (make-hash-table :test #'equal))
+(defvar fetch-dom--values-time nil)
 
 (cl-defstruct fetch-dom
   url wait-period-headless wait-period-popup
@@ -67,7 +68,12 @@ buffer containing the data).
 If `:callback' is given, the function will be asynchronous and
 the callback argument will be called (with a single parameter --
 the result)."
+  (when (or (not fetch-dom--values-time)
+	    (> (- (float-time) fetch-dom--values-time) 600))
+    (setq fetch-dom--values-time nil
+	  fetch-dom--host-values (make-hash-table :test #'equal)))
   (let ((done nil))
+    (setq fetch-dom--values-time (float-time))
     (fetch-dom--async-1
      (make-fetch-dom
       :url url
