@@ -53,17 +53,24 @@
 
 (cl-defstruct fetch-dom
   url wait-period-headless wait-period-popup
-  user-agent type callback)
+  user-agent type callback min-level max-level)
 
 (cl-defun fetch-dom (url &key wait-period-headless wait-period-popup
 			 user-agent (type 'dom)
-			 callback)
+			 callback (min-level 'internal)
+			 (max-level 'popup))
   "Fetch URL.
 
 By default, the DOM is returned, but this is controlled by the
 `:type' keyword.  Values are `dom' (the default),
 `string' (return the results as a string) and `buffer' (return a
 buffer containing the data).
+
+`:min-level' is the level to start at.  Valid values are `internal',
+`headless' and `popup'.
+
+`:max-level' is the maximum level to end and.  Valid values are
+the same as `:min-level'.
 
 If `:callback' is given, the function will be asynchronous and
 the callback argument will be called (with a single parameter --
@@ -83,7 +90,9 @@ the result)."
       :wait-period-headless wait-period-headless
       :wait-period-popup wait-period-popup
       :user-agent user-agent
-      :type type))
+      :type type
+      :min-level min-level
+      :max-level max-level))
     (unless callback
       (while (not done)
 	(sit-for 0.01))
@@ -92,7 +101,8 @@ the result)."
 (defun fetch-dom--async-1 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
     ;; First try to fetch using url.el.
-    (if (not (fetch-dom--try-internal-p host))
+    (if (or (not (fetch-dom--try-internal-p host))
+	    (not (eq (fetch-dom-min-level call) 'internal)))
 	(fetch-dom--async-2 call)
       (fetch-dom--internal
        (fetch-dom-url call)
@@ -106,14 +116,16 @@ the result)."
 	 (if (not (fetch-dom--got-result-p))
 	     (progn
 	       (fetch-dom--failure 'internal host)
-	       (fetch-dom--async-2 call))
+	       (if (eq (fetch-dom-max-level call) 'internal)
+		   (fetch-dom--callback call)
+		 (fetch-dom--async-2 call)))
 	   (fetch-dom--success 'internal host)
-	   (funcall (fetch-dom-callback call)
-		    (fetch-dom--return-result (fetch-dom-type call)))))))))
+	   (fetch-dom--callback call)))))))
 
 (defun fetch-dom--async-2 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
-    (if (not (fetch-dom--try-headless-p host))
+    (if (or (not (fetch-dom--try-headless-p host))
+	    (not (eq (fetch-dom-min-level call) 'headless)))
 	(fetch-dom--async-3 call)
       (fetch-dom--selenium
        (fetch-dom-url call) "headless"
@@ -124,10 +136,15 @@ the result)."
 	 (if (not (fetch-dom--got-result-p))
 	     (progn
 	       (fetch-dom--failure 'headless host)
-	       (fetch-dom--async-3 call))
+	       (if (eq (fetch-dom-max-level call) 'headless)
+		   (fetch-dom--callback call)
+		 (fetch-dom--async-3 call)))
 	   (fetch-dom--success 'headless host)
-	   (funcall (fetch-dom-callback call)
-		    (fetch-dom--return-result (fetch-dom-type call)))))))))
+	   (fetch-dom--callback call)))))))
+
+(defun fetch-dom--callback (call)
+  (funcall (fetch-dom-callback call)
+	   (fetch-dom--return-result (fetch-dom-type call))))
 
 (defun fetch-dom--async-3 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
@@ -139,9 +156,8 @@ the result)."
      (lambda ()
        (if (not (fetch-dom--got-result-p))
 	   (fetch-dom--failure 'popup host)
-	 (fetch-dom--success 'popup host)
-	 (funcall (fetch-dom-callback call)
-		  (fetch-dom--return-result (fetch-dom-type call))))))))
+	 (fetch-dom--success 'popup host))
+       (fetch-dom--callback call)))))
 
 (defun fetch-dom--success (type host)
   (push type (gethash host fetch-dom--host-values)))
