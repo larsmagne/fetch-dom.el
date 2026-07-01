@@ -101,8 +101,9 @@ the result)."
 (defun fetch-dom--async-1 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
     ;; First try to fetch using url.el.
-    (if (or (not (fetch-dom--try-internal-p host))
-	    (not (eq (fetch-dom-min-level call) 'internal)))
+    (if (and (or (not (fetch-dom--try-internal-p host))
+		 (not (eq (fetch-dom-min-level call) 'internal)))
+	     (not (eq (fetch-dom-max-level call) 'internal)))
 	(fetch-dom--async-2 call)
       (fetch-dom--internal
        (fetch-dom-url call)
@@ -124,8 +125,9 @@ the result)."
 
 (defun fetch-dom--async-2 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
-    (if (or (not (fetch-dom--try-headless-p host))
-	    (not (eq (fetch-dom-min-level call) 'headless)))
+    (if (and (or (not (fetch-dom--try-headless-p host))
+		 (not (eq (fetch-dom-min-level call) 'headless)))
+	     (not (eq (fetch-dom-max-level call) 'headless)))
 	(fetch-dom--async-3 call)
       (fetch-dom--selenium
        (fetch-dom-url call) "headless"
