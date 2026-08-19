@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-
 import time
 import random
 import json
@@ -7,7 +6,6 @@ import sys
 import os
 import pickle
 from urllib.parse import urlparse
-
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
@@ -23,59 +21,57 @@ cookie_file = sys.argv[5]
 
 service = ChromeService(executable_path="/usr/bin/chromedriver")
 
-# Open Crome
+# Open Chrome
 chrome_options = webdriver.ChromeOptions()
-prefs = {"profile.default_content_setting_values.notifications" : 2}
+prefs = {"profile.default_content_setting_values.notifications": 2}
 chrome_options.add_experimental_option("prefs", prefs)
 chrome_options.add_argument("--disable-notifications")
 # The default User-Agent is "HeadlessChrome", which imdb.com bans.
 chrome_options.add_argument('--user-agent=' + user_agent)
 if headless == "headless":
     chrome_options.add_argument("--headless=new")
-chrome_options.add_argument("--disable-dev-shm-usage");
+chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_experimental_option('prefs', {'intl.accept_languages': 'en'})
 
-# Give the chosen driver as an option to Chrome()
-driver = webdriver.Chrome(options = chrome_options, service = service)
+driver = webdriver.Chrome(options=chrome_options, service=service)
+
 
 def save_cookies():
-    pickle.dump(driver.get_cookies() , open(cookie_file, "wb"))
+    pickle.dump(driver.get_cookies(), open(cookie_file, "wb"))
+
 
 def load_cookies():
-    if os.path.exists(cookie_file):
-        cookies = pickle.load(open(cookie_file, "rb"))
+    if not os.path.exists(cookie_file):
+        return
 
-        # Enables network tracking so we may use Network.setCookie method
-        driver.execute_cdp_cmd('Network.enable', {})
+    cookies = pickle.load(open(cookie_file, "rb"))
 
-        # Iterate through pickle dict and add all the cookies
-        for cookie in cookies:
-            # Fix issue Chrome exports 'expiry' key but expects
-            # 'expire' on import
-            if 'expiry' in cookie:
-                cookie['expires'] = cookie['expiry']
-                del cookie['expiry']
+    # Enable network tracking so we can use Network.setCookie
+    driver.execute_cdp_cmd('Network.enable', {})
 
-            # Set the actual cookie
-            driver.execute_cdp_cmd('Network.setCookie', cookie)
+    for cookie in cookies:
+        # Chrome exports 'expiry' but CDP's Network.setCookie expects 'expires'
+        if 'expiry' in cookie:
+            cookie['expires'] = cookie.pop('expiry')
 
-        # Disable network tracking
-        driver.execute_cdp_cmd('Network.disable', {})
+        # CDP requires either 'url' or 'domain'+'path' to know where the
+        # cookie applies. Selenium's get_cookies() gives us domain/path
+        # already, so this is normally fine as-is. If 'domain' is missing
+        # for some reason, fall back to deriving it from our target URL.
+        if 'domain' not in cookie:
+            parsed = urlparse(url)
+            cookie['domain'] = parsed.netloc
 
-# First load the top-level domain so that we can set the cookies.
-# (This is apparently how Chrome/Selenium works.)
-parsed = urlparse(url)
-driver.get(f"{parsed.scheme}://{parsed.netloc}/")
+        driver.execute_cdp_cmd('Network.setCookie', cookie)
+
+    driver.execute_cdp_cmd('Network.disable', {})
+
 load_cookies()
-
-# Then get the actual URL we want the DOM for.
 driver.get(url)
 
 if float(wait) > 0:
     time.sleep(float(wait))
 
 save_cookies()
-
 print(driver.execute_script("return document.body.innerHTML;"))
-
 driver.quit()
