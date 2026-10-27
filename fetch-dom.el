@@ -42,7 +42,7 @@
 (defvar fetch-dom-wait-period-headless 0
   "Number of seconds to wait before returning result when headless.")
 
-(defvar fetch-dom-wait-period-popup 10
+(defvar fetch-dom-wait-period-popup 30
   "Number of seconds to wait before returning result when popping up window.")
 
 (defvar fetch-dom-cookie-file "~/.emacs.d/fetch-dom.pickle"
@@ -58,6 +58,7 @@
 (cl-defun fetch-dom (url &key wait-period-headless wait-period-popup
 			 user-agent (type 'dom)
 			 callback (min-level 'internal)
+			 ignore-previous-failures
 			 (max-level 'popup))
   "Fetch URL.
 
@@ -74,11 +75,19 @@ the same as `:min-level'.
 
 If `:callback' is given, the function will be asynchronous and
 the callback argument will be called (with a single parameter --
-the result)."
+the result).
+
+If `:ignore-previous-failures', clear previous status before
+attempting a fetch."
   (when (or (not fetch-dom--values-time)
 	    (> (- (float-time) fetch-dom--values-time) 600))
     (setq fetch-dom--values-time nil
 	  fetch-dom--host-values (make-hash-table :test #'equal)))
+  ;; Allow nixing out values.
+  (when ignore-previous-failures
+    (setf (gethash (url-host (url-generic-parse-url url))
+		   fetch-dom--host-values)
+	  nil))
   (let ((done nil))
     (setq fetch-dom--values-time (float-time))
     (fetch-dom--async-1
@@ -126,8 +135,8 @@ the result)."
 (defun fetch-dom--async-2 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
     (if (and (or (not (fetch-dom--try-headless-p host))
-		 (not (eq (fetch-dom-min-level call) 'headless)))
-	     (not (eq (fetch-dom-max-level call) 'headless)))
+		 (eq (fetch-dom-min-level call) 'popup))
+	     (not (memq (fetch-dom-max-level call) '(internal headless))))
 	(fetch-dom--async-3 call)
       (fetch-dom--selenium
        (fetch-dom-url call) "headless"
@@ -208,6 +217,7 @@ the result)."
   ;; whether there's very few HTML nodes.  This may need adjusting.
   (let ((result
 	 (and (> (buffer-size) 100)
+	      (not (string-match-p "captcha" (buffer-string)))
 	      (> (fetch-dom--count (libxml-parse-html-region
 				    (point-min) (point-max)))
 		 10))))
