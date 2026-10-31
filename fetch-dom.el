@@ -127,7 +127,7 @@ attempting a fetch."
 	     (progn
 	       (fetch-dom--failure 'internal host)
 	       (if (eq (fetch-dom-max-level call) 'internal)
-		   (fetch-dom--callback call)
+		   (fetch-dom--fail-callback call)
 		 (fetch-dom--async-2 call)))
 	   (fetch-dom--success 'internal host)
 	   (fetch-dom--callback call)))))))
@@ -148,7 +148,7 @@ attempting a fetch."
 	     (progn
 	       (fetch-dom--failure 'headless host)
 	       (if (eq (fetch-dom-max-level call) 'headless)
-		   (fetch-dom--callback call)
+		   (fetch-dom--fail-callback call)
 		 (fetch-dom--async-3 call)))
 	   (fetch-dom--success 'headless host)
 	   (fetch-dom--callback call)))))))
@@ -156,6 +156,13 @@ attempting a fetch."
 (defun fetch-dom--callback (call)
   (funcall (fetch-dom-callback call)
 	   (fetch-dom--return-result (fetch-dom-type call))))
+
+(defun fetch-dom--fail-callback (call)
+  (funcall (fetch-dom-callback call)
+	   (pcase (fetch-dom-type call)
+	     (`dom nil)
+	     (`string "")
+	     (`buffer (generate-new-buffer " *fetch-dom*")))))
 
 (defun fetch-dom--async-3 (call)
   (let ((host (url-host (url-generic-parse-url (fetch-dom-url call)))))
@@ -166,9 +173,11 @@ attempting a fetch."
      (or (fetch-dom-user-agent call) fetch-dom-user-agent)
      (lambda ()
        (if (not (fetch-dom--got-result-p))
-	   (fetch-dom--failure 'popup host)
-	 (fetch-dom--success 'popup host))
-       (fetch-dom--callback call)))))
+	   (progn
+	     (fetch-dom--failure 'popup host)
+	     (fetch-dom--fail-callback call))
+	 (fetch-dom--success 'popup host)
+	 (fetch-dom--callback call))))))
 
 (defun fetch-dom--success (type host)
   (push type (gethash host fetch-dom--host-values)))
@@ -273,10 +282,11 @@ attempting a fetch."
 (defun fetch-dom--selenium (url headless wait-period user-agent callback)
   (with-current-buffer (generate-new-buffer "*fetch-dom*")
     (let ((default-directory (file-name-directory
-			      (locate-library "fetch-dom"))))
+			      (locate-library "fetch-dom")))
+	  (buf (current-buffer)))
       (make-process
        :name "get-html"
-       :buffer (current-buffer)
+       :buffer buf
        :command (list (expand-file-name "get-html.py")
 		      url
 		      headless
@@ -286,7 +296,7 @@ attempting a fetch."
        :sentinel
        (lambda (proc _status)
 	 (unless (process-live-p proc)
-	   (with-current-buffer (process-buffer proc)
+	   (with-current-buffer buf
 	     (funcall callback))))))))
 
 (provide 'fetch-dom)
