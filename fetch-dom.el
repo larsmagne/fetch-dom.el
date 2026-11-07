@@ -42,7 +42,7 @@
 (defvar fetch-dom-wait-period-headless 0
   "Number of seconds to wait before returning result when headless.")
 
-(defvar fetch-dom-wait-period-popup 30
+(defvar fetch-dom-wait-period-popup 20
   "Number of seconds to wait before returning result when popping up window.")
 
 (defvar fetch-dom-cookie-file "~/.emacs.d/fetch-dom.pickle"
